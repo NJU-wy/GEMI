@@ -19,7 +19,6 @@ from models import generate_single_rgb
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-# 将 main.py 的 AdvancedHybridViT 定义原样复制过来
 class AdvancedHybridViT(nn.Module):
     def __init__(self, num_classes=3, macro_dim=7):
         super().__init__()
@@ -71,13 +70,11 @@ class MultiViewDataset(Dataset):
 
 def main():
     print("=== 📊 启动 SOTA 严格无泄露评估与可视化引擎 ===")
-
-    # ✅ P0 修复: 绝不重新计算，直接从 Train 凭证中读取
     import pandas as pd
+
     with open("training_artifacts.pkl", "rb") as f:
         artifacts = pickle.load(f)
 
-    # 复用清洗逻辑
     df = pd.read_feather('/root/autodl-tmp/battery/processed_data.feather').apply(pd.to_numeric,
                                                                                   errors='coerce').ffill().bfill().fillna(
         0)
@@ -92,7 +89,6 @@ def main():
     num_cells, total_rows = V.shape[1], V.shape[0]
     global_labels = build_global_labels(artifacts["cell_names"])
 
-    # ✅ 完全复用训练时的 AE 模型
     from models import DenoisingAutoencoder, get_physics_benchmark
     ae = DenoisingAutoencoder(num_cells=artifacts["win"]).to(device)
     ae.load_state_dict(torch.load("ae_denoiser_best.pth", map_location=device))
@@ -112,19 +108,17 @@ def main():
             raw_list.append(V[t:t + win, c])
             for_ae_list.append(V_for_ae[t:t + win, c])
             phy_list.append(V_phy_all[t:t + win] if V_phy_all.ndim == 1 else V_phy_all[t:t + win, c])
-            macro_list.append([
-                np.mean(V[t:t + win, c]), np.std(V[t:t + win, c]), V[t:t + win, c][-1] - V[t:t + win, c][0],
-                np.mean(V_for_ae[t:t + win, c]), np.std(V_for_ae[t:t + win, c]),
-                np.mean(I[t:t + win]), np.mean(S[t:t + win])
-            ])
-            label_list.append(global_labels[c])
+            macro_list.append(
+                [np.mean(V[t:t + win, c]), np.std(V[t:t + win, c]), V[t:t + win, c][-1] - V[t:t + win, c][0],
+                 np.mean(V_for_ae[t:t + win, c]), np.std(V_for_ae[t:t + win, c]), np.mean(I[t:t + win]),
+                 np.mean(S[t:t + win])])
+            label_list.append(global_labels[c]);
             cell_idx_list.append(c)
 
     raw_slices, for_ae_slices, phy_slices = np.array(raw_list), np.array(for_ae_list), np.array(phy_list)
     slice_labels, slice_cell_indices, macro_slices = np.array(label_list), np.array(cell_idx_list), np.array(macro_list,
                                                                                                              dtype=np.float32)
 
-    # 仅评估 Test 实体集
     idx_test = np.where(np.isin(slice_cell_indices, artifacts["test_cells_idx"]))[0]
     macro_slices = (macro_slices - artifacts["train_macro_mean"]) / artifacts["train_macro_std"]
 
@@ -165,26 +159,25 @@ def main():
     print("\n=== 📝 严格无泄露性能报告 (真实世界分布) ===")
     print(classification_report(y_true, y_pred, target_names=target_names))
 
-    # [画图部分与之前相同：包含混淆矩阵、ROC、t-SNE]
     plt.style.use('seaborn-v0_8-whitegrid')
     plt.figure(figsize=(8, 6))
     sns.heatmap(confusion_matrix(y_true, y_pred), annot=True, fmt='d', cmap='Blues', xticklabels=target_names,
                 yticklabels=target_names, annot_kws={"size": 14})
     plt.title('Strictly Unbiased Confusion Matrix', fontsize=16, fontweight='bold')
-    plt.tight_layout()
+    plt.tight_layout();
     plt.savefig('confusion_matrix.png', dpi=300)
 
     y_bin = label_binarize(y_true, classes=[0, 1, 2])
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(8, 6));
     colors = ['green', 'red', 'orange']
     for i in range(3):
-        if np.sum(y_bin[:, i]) > 0:  # 防止某类测试集中碰巧没有
+        if np.sum(y_bin[:, i]) > 0:
             fpr, tpr, _ = roc_curve(y_bin[:, i], y_prob[:, i])
             plt.plot(fpr, tpr, color=colors[i], lw=2, label=f'{target_names[i]} (AUC = {auc(fpr, tpr):.4f})')
     plt.plot([0, 1], [0, 1], 'k--', lw=2);
     plt.xlim([0.0, 1.0]);
     plt.ylim([0.0, 1.05])
-    plt.legend(loc="lower right", fontsize=12)
+    plt.legend(loc="lower right", fontsize=12);
     plt.savefig('roc_curve.png', dpi=300)
 
     print("✅ 终极严谨 SOTA 图表生成完毕！")
